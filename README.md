@@ -150,8 +150,7 @@ summary(model_input_skip)
 #> x4  0  0  0 0.321 0.575 0.124 0.419
 #> x5  0  0  0 0.098 0.438 0.137 0.256
 #> x6  1  0  1 0.300 0.244 0.997 0.338
-#> -----------------------------------
-#> The model took 11.864 seconds to train, using cpu
+#> The model took 12.011 seconds to train, using cpu
 ```
 
 The user can also plot local explanations for each input variable

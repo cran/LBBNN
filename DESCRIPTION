@@ -1,6 +1,6 @@
 Package: LBBNN
 Title: Latent Binary Bayesian Neural Networks Using 'torch'
-Version: 0.1.1
+Version: 0.1.2
 Authors@R: c(person("Lars", "Skaaret-Lund", email = "lars.skaaret-lund@nmbu.no", role = c("aut", "cre")), person("Aliaksandr", "Hubin", email = "aliaksandr.hubin@nmbu.no", role = c("aut")), person("Eirik", "Høyheim", email = "eirik.hoyheim@ffi.no", role = "aut"))
 Maintainer: Lars Skaaret-Lund <lars.skaaret-lund@nmbu.no>
 Description: Latent binary Bayesian neural networks (LBBNNs) are implemented using 
@@ -14,16 +14,16 @@ License: MIT + file LICENSE
 Encoding: UTF-8
 RoxygenNote: 7.3.2
 Language: en-US
-Suggests: testthat (>= 3.0.0), knitr, rmarkdown
+Suggests: testthat (>= 3.0.0), knitr, rmarkdown, torchvision
 Config/testthat/edition: 3
 Depends: R (>= 3.5)
 LazyData: true
 VignetteBuilder: knitr
 Imports: ggplot2, torch, igraph, coro, svglite
 NeedsCompilation: no
-Packaged: 2025-11-25 10:49:33 UTC; larsskaaret-lund
+Packaged: 2025-12-10 09:28:43 UTC; larsskaaret-lund
 Author: Lars Skaaret-Lund [aut, cre],
   Aliaksandr Hubin [aut],
   Eirik Høyheim [aut]
 Repository: CRAN
-Date/Publication: 2025-12-01 14:10:17 UTC
+Date/Publication: 2025-12-10 09:50:02 UTC

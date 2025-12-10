@@ -293,7 +293,7 @@ coef.LBBNN_Net <- function(object,dataset,inds = NULL,output_neuron = 1,num_data
 #'@title Obtain predictions from the variational posterior of an \code{LBBNN model}
 #'@description Draw from the (variational) posterior distribution of a trained \code{LBBNN_Net} object.
 #'@param object A trained \code{LBBNN_Net} object
-#'@param mpm logical, whether to use the median probability model. 
+#'@param mpm logical, whether to use the median probability model.
 #'@param newdata A \code{torch::dataloader} object containing the data with which to predict.
 #'@param draws integer, the number of samples to draw from the posterior. 
 #'@param device character, device for computation (default = \code{"cpu"}). 
@@ -318,13 +318,13 @@ coef.LBBNN_Net <- function(object,dataset,inds = NULL,output_neuron = 1,num_data
 #'predict(model,mpm = FALSE,newdata = train_loader,draws = 1)
 #'}
 #' @export
-predict.LBBNN_Net <- function(object,mpm,newdata,draws,device = 'cpu',link = NULL,...){#should newdata be a dataloader or a dataset?
+predict.LBBNN_Net <- function(object,newdata,mpm = FALSE,draws = 10,device = 'cpu',link = NULL,...){#should newdata be a dataloader or a dataset?
   object$eval()
   object$raw_output = TRUE #skip final sigmoid/softmax
   if(! object$computed_paths){
     if(object$input_skip){object$compute_paths_input_skip()} #need this to get active paths to compute mpm
     else(object$compute_paths)
-    object$computed_paths <- TRUE
+   
     
   }
   if(class(newdata)[[1]] != 'dataloader')stop('Currently only torch::dataloader objects are supported for newdata')
@@ -450,7 +450,6 @@ print.LBBNN_Net <- function(x, ...) {
 plot.LBBNN_Net <- function(x,type = c('global','local'),data = NULL,num_samples = 100, ...) {
   if(x$input_skip == FALSE)(stop('Plotting currently only implemented for input-skip'))
   if(x$computed_paths == FALSE){x$compute_paths_input_skip()}
-  x$computed_paths <- TRUE
   d <- match.arg(type)
   if(d == 'global'){
     LBBNN_plot(x,...)
