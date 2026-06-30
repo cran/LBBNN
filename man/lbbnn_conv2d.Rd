@@ -14,7 +14,8 @@ lbbnn_conv2d(
   flow = FALSE,
   num_transforms = 2,
   hidden_dims = c(200, 200),
-  device = "cpu"
+  device = "cpu",
+  weight_init = "uniform"
 )
 }
 \arguments{
@@ -30,8 +31,11 @@ each weight and bias in the layer.}
 \item{standard_prior}{numeric scalar, prior standard deviation for
 weights and biases in each layer.}
 
-\item{density_init}{A numeric of size 2, used to initialize the
-inclusion parameters, one for each layer.}
+\item{density_init}{Controls initialization of the inclusion parameters.
+A string keyword or a numeric vector \code{c(lower, upper)}.
+String options: \code{"polarized"}, \code{"polarized_mild"},
+\code{"polarized_sparse"}, \code{"polarized_dense"},
+\code{"dense"}, \code{"sparse"}, \code{"balanced"}.}
 
 \item{flow}{logical, whether to use normalizing flows}
 
@@ -41,7 +45,16 @@ Default is 2.}
 \item{hidden_dims}{numeric vector, dimension of the hidden layer(s)
 in the neural networks of the RNVP transform.}
 
-\item{device}{The device to be used. Default is CPU.}
+\item{device}{the device to be used. One of \code{'cpu'} (default),
+\code{'gpu'} or \code{'cuda'} (both select a CUDA GPU), or \code{'mps'}.
+Requesting an accelerator that is not available raises an error.}
+
+\item{weight_init}{Controls how \code{weight_mean} is initialized.
+A string keyword or a numeric vector \code{c(lower, upper)} for custom
+uniform bounds. String options: \code{"uniform"} (default, small uniform),
+\code{"he"} / \code{"he_relu"} (Kaiming uniform for ReLU),
+\code{"he_tanh"} (Kaiming uniform for tanh),
+\code{"glorot"} / \code{"xavier"} (Xavier uniform).}
 }
 \value{
 A \code{torch::nn_module} object representing a convolutional

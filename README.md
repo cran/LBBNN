@@ -14,11 +14,12 @@ MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 <!-- badges: end -->
 
-The goal of LBBNN is to implement Latent Bayesian Binary Neural Networks
-(<https://openreview.net/pdf?id=d6kqUKzG3V>) in R, using the torch for R
-package. Currently, standard LBBNNs are implemented. In the future, we
-will also implement LBBNNs with input-skip (see
-<https://arxiv.org/abs/2503.10496>).
+The package implements LBBNN (Latent Binary Bayesian Neural Networks)
+(<https://openreview.net/pdf?id=d6kqUKzG3V>) in R using the LibTorch
+backend via the Torch package. Currently, standard LBBNNs are
+implemented, using the local reparametrization tricks and optionally
+normalizing flows. In addition, the input-skip architecture is also
+implemented. <https://arxiv.org/abs/2503.10496>).
 
 ## Installation
 
@@ -33,59 +34,59 @@ pak::pak("LarsELund/LBBNN")
 ## Example
 
 This example demonstrates how to implement a simple feed forward LBBNN
-on the raisin_dataset.
+on a small dataset containing morphological features of two types of
+raisins. The raisin dataset is included in the package.
 
-First, data must be processed and moved to torch dataloaders, using the
-get_dataloaders() function:
+The get_dataloaders() function takes a data.frame object, and transforms
+it to a tensor_dataset, which can be used in a torch_dataloader object.
+This enables automatic mini-batching and parallel data loading.
+
+The arguments define the proportion of data to be used for training vs
+validation in addition to the batch sizes for the respective
+dataloaders.
 
 ``` r
 library(LBBNN)
-library(ggplot2)
-library(torch)
-
-#the get_dataloaders function takes a data.frame dataset as input, then splits the data
-#in a training and validation set based on train_proportion, and returns torch dataloader 
-#objects.
 loaders <- get_dataloaders(raisin_dataset, train_proportion = 0.8, 
                            train_batch_size = 720, test_batch_size = 180)
 train_loader <- loaders$train_loader
 test_loader <- loaders$test_loader
 ```
 
-To initialize the LBBNN, we first define some hyperparameters. First,
-the user must define what type of problem they are facing. This could be
-either binary classification (as in this case), multiclass
-classification (more than two classes), or regression (continuous
-output). Next, the user needs to define a size vector. The first element
-is the number of variables in the dataset (7 in this case), the last
-element is the number of output neurons (1 here), and the elements in
-between represent the number of neurons in the hidden layer(s). Then,
-the user must define the prior inclusion probability for each weight
-matrix. This parameter is important as it reflects prior beliefs about
-how dense the network should be. The user also needs to define the prior
-standard deviation for the weight and bias parameters. Lastly, the user
-must define the initialization of the inclusion parameters.
+Important hyperparameters include the size of the network, priors, and
+initializations. When defining an ‘lbbnn_net’ object, the sizes argument
+is a vector of integers, where the first entry represents the number of
+features (7 in this case), the subsequent entries are the widths of the
+hidden layers, and the last entry the number of outputs.
+
+The prior argument defines the inclusion priors for each layer, whereas
+std refers to the standard deviation of the weight priors.
+inclusion_inits refers to the initialization of the variationa
+linclusion parameters. It controls the initial density of the network.
 
 ``` r
 problem <- 'binary classification'
-sizes <- c(7, 5, 5, 1) #7 input variables, two hidden layers of 5 neurons each, 1 output neuron.
-inclusion_priors <-c(0.5, 0.5, 0.5) #one prior probability per weight matrix.
-stds <- c(1, 1, 1) #prior standard deviation for each layer.
-inclusion_inits <- matrix(rep(c(-10, 15), 3),nrow = 2, ncol = 3) #one low and high for each layer.
+sizes <- c(7, 5, 5, 1) 
+inclusion_priors <-c(0.5, 0.5, 0.5) 
+stds <- c(1, 1, 1) 
+#inclusion_inits <- matrix(rep(c(-10, 15), 3),nrow = 2, ncol = 3)
+inclusion_inits <- 'dense'
 device <- 'cpu' #can also be mps or gpu.
 ```
 
-We can now define the model. We use the mean-field posterior and
-input-skip.
+Below we define the model. We use the input_skip architecture in this
+case, but not normalizing flows.
 
 ``` r
-torch_manual_seed(0)
+torch::torch_manual_seed(0)
 model_input_skip <- lbbnn_net(problem_type = problem,sizes = sizes,prior = inclusion_priors,
                       inclusion_inits = inclusion_inits,input_skip = TRUE,std = stds,
                    flow = FALSE,device = device)
 ```
 
-To train the model, the function train_lbbnn is used.
+The function lbbnn_train is used to train the model. In this case, for
+800 epochs with a learning rate of 0.01. During training, the loss and
+accuracy can be displayed at each epoch.
 
 ``` r
 results_input_skip <- suppressMessages(train_lbbnn(epochs = 800,LBBNN = model_input_skip, lr = 0.01,train_dl = train_loader,device = device))
@@ -94,27 +95,31 @@ results_input_skip <- suppressMessages(train_lbbnn(epochs = 800,LBBNN = model_in
 #paste(getwd(),'/R/saved_models/README_input_skip_example_model.pth',sep = ''))
 ```
 
-To evaluate performance on the validation data, the function
-validate_lbbnn is used. It takes a model, number of samples for model
-averaging, and the validation data as input.
+Below, validate_lbbnn is used to test the model on unseen data. We
+provide the test_loader containing the data set aside during training.
 
 ``` r
 validate_lbbnn(LBBNN = model_input_skip,num_samples = 100,test_dl = test_loader,device)
 #> $accuracy_full_model
-#> [1] 0.8666667
+#> [1] 0.8611111
 #> 
 #> $accuracy_sparse
-#> [1] 0.8555555
+#> [1] 0.8611111
 #> 
 #> $density
-#> [1] 0.1214953
+#> [1] 0.06542056
 #> 
 #> $density_active_path
-#> [1] 0.09345794
+#> [1] 0.06542056
 #validate_lbbnn(LBBNN = model_flows,num_samples = 1000,test_dl = test_loader,device)
 ```
 
-Plot the global structure (explanation) for the given model:
+The package provides utilities for both global and local explanations.
+Global explanations describe how the models behaves overall across the
+entire dataset. The function plot, with argument type = ‘global’
+visualizes the structure of the network, when only weights within active
+paths are included, where an active path is a path from an input, to the
+output, either directly or through one or more hidden neurons.
 
 ``` r
 plot(model_input_skip,type = 'global',vertex_size = 13,edge_width = 0.6,label_size = 0.6)
@@ -122,9 +127,10 @@ plot(model_input_skip,type = 'global',vertex_size = 13,edge_width = 0.6,label_si
 
 <img src="man/figures/README-unnamed-chunk-6-1.png" width="100%" />
 
-Note that only 4 of the 7 input variables are used.
+We see that only 4 of the 7 input variables are included..
 
-This can also be seen using the summary function:
+The summary function provides further detail into inclusion
+probabilities from different layers.
 
 ``` r
 summary(model_input_skip)
@@ -137,17 +143,21 @@ summary(model_input_skip)
 #> The final column shows the average inclusion probability across all layers
 #> -----------------------------------
 #>    L0 L1 L2    a0    a1    a2 a_avg
-#> x0  0  0  0 0.136 0.077 0.035 0.100
-#> x1  0  0  0 0.325 0.064 0.149 0.190
-#> x2  0  1  0 0.076 0.336 0.080 0.194
-#> x3  1  0  1 0.425 0.267 0.999 0.406
-#> x4  1  1  0 0.327 0.352 0.058 0.314
-#> x5  0  1  0 0.140 0.280 0.230 0.212
-#> x6  0  0  1 0.058 0.256 0.988 0.232
-#> The model took 11.162 seconds to train, using cpu
+#> x0  0  0  0 0.073 0.064 0.053 0.067
+#> x1  0  1  0 0.074 0.225 0.066 0.142
+#> x2  0  0  0 0.071 0.068 0.051 0.068
+#> x3  0  1  0 0.089 0.207 0.106 0.144
+#> x4  0  0  0 0.061 0.076 0.044 0.066
+#> x5  0  1  0 0.060 0.204 0.195 0.138
+#> x6  0  1  1 0.069 0.277 0.992 0.247
+#> The model took 9.92 seconds to train, using cpu
 ```
 
-Local explanations for a specific sample using plot():
+Local explanations aim to explain a model’s prediction for a specific
+observation by quantifying how each input feature influences that
+prediction. Below we show one example. Unlike other methods like SHAP
+and LIME, our local explanations are intrinsic, and we also get
+uncertainty around the explanations.
 
 ``` r
 x <- train_loader$dataset$tensors[[1]] #grab the dataset
@@ -158,29 +168,29 @@ plot(model_input_skip,type = 'local',data = data,num_samples = 100)
 
 <img src="man/figures/README-unnamed-chunk-8-1.png" width="100%" />
 
-Compute residuals: y_true - y_predicted
+The residual function computes the residuals: y_true - y_predicted
 
 ``` r
 residuals(model_input_skip)[1:10]
-#>  [1] -0.23637275  0.05227208 -0.04005997  0.13478029  0.20345378 -0.09961643
-#>  [7]  0.05248320  0.14917880 -0.07054520  0.06071264
+#>  [1] -0.16605029  0.08027482 -0.06073312  0.06734884  0.11117309 -0.06302989
+#>  [7]  0.02952594  0.14954549 -0.06676923  0.03041196
 ```
 
-Get local explanations using coef():
+coef gives the local explanations average over multiple samples:
 
 ``` r
 coef(model_input_skip,dataset = train_loader,inds = c(2,3,4,5,6))
-#>         lower       mean      upper
-#> x0  0.0000000  0.0000000  0.0000000
-#> x1  0.0000000  0.0000000  0.0000000
-#> x2 -1.4081770 -1.0450520 -0.1182637
-#> x3 -3.0491267 -1.5438678 -0.5097757
-#> x4 -1.5836792 -0.5174002  0.8989937
-#> x5  0.0000000  0.3023412  0.5179587
-#> x6 -0.7162537 -0.6587479 -0.6052896
+#>         lower       mean       upper
+#> x0  0.0000000  0.0000000  0.00000000
+#> x1 -0.9935143 -0.6864897 -0.07549272
+#> x2  0.0000000  0.0000000  0.00000000
+#> x3 -0.3978343 -0.2250528  0.00000000
+#> x4  0.0000000  0.0000000  0.00000000
+#> x5  0.0000000  0.2754804  0.47322066
+#> x6 -2.8249421 -2.0773863 -1.00955870
 ```
 
-Get posterior predictions:
+posterior predictions:
 
 ``` r
 predictions <- predict(model_input_skip,mpm = TRUE,newdata = test_loader,draws = 100)

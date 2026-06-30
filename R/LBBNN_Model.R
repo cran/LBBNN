@@ -20,13 +20,17 @@
 #' length must be \code{length(sizes) - 1}.
 #' @param inclusion_inits numeric matrix of shape (2, number of weight matrices)
 #' specifying the lower and upper bounds for initializations
-#' of the inclusion parameters.
+#' of the inclusion parameters. NOTE: Can also be given as a keyword with the 
+#' following options: 'balanced', 'dense', 'polarized', 'polarized_dense', 
+#' 'polarized_mild', 'polarized_sparse', 'sparse'.
 #' @param input_skip logical, whether to include input_skip.
-#' @param flow logical, whether to use normalizing flows.
+#' @param flow logical, to use normalizing flows.
 #' @param num_transforms integer, how many transformations to use in the flow.
 #' @param dims numeric vector, hidden dimension for the neural network
 #' in the RNVP transform.
-#' @param device the device to be trained on. Can be 'cpu', 'gpu' or 'mps'.
+#' @param device the device to be used. One of \code{'cpu'} (default),
+#' \code{'gpu'} or \code{'cuda'} (both select a CUDA GPU), or \code{'mps'}.
+#' Requesting an accelerator that is not available raises an error.
 #' Default is cpu.
 #' @param raw_output logical, whether the network skips the last sigmoid/softmax
 #'  layer to compute local explanations.
@@ -36,6 +40,12 @@
 #' @param nll User can define their own likelihood function (not implemented).
 #' @param bias_inclusion_prob logical, determines whether the bias should
 #' be as associated with inclusion probabilities.
+#' @param weight_init Controls how \code{weight_mean} is initialized in each
+#' layer. A string keyword or a numeric vector \code{c(lower, upper)} for
+#' custom uniform bounds. String options: \code{"uniform"} (default),
+#' \code{"he"} / \code{"he_relu"} (Kaiming uniform for ReLU),
+#' \code{"he_tanh"} (Kaiming uniform for tanh),
+#' \code{"glorot"} / \code{"xavier"} (Xavier uniform).
 #' @examples
 #' \donttest{
 #' if (torch_available()) {
@@ -77,7 +87,8 @@ lbbnn_net <- torch::nn_module(
                         input_skip = FALSE, flow = FALSE, num_transforms = 2,
                         dims = c(200, 200), device = "cpu", raw_output = FALSE,
                         custom_act = NULL, link = NULL, nll = NULL,
-                        bias_inclusion_prob = FALSE) {
+                        bias_inclusion_prob = FALSE, weight_init = "uniform") {
+    device <- resolve_device(device)
     self$device <- device
     self$layers <- torch::nn_module_list()
     self$problem_type <- problem_type
@@ -91,8 +102,13 @@ lbbnn_net <- torch::nn_module(
     self$prior_std <- std
     self$elapsed_time <- 0 #to check how much time the model takes to train
     self$raw_output <- raw_output # TRUE when we want local explanations
+    self$weight_init <- weight_init
     self$act <- torch::nn_leaky_relu(0.00)
-    self$computed_paths <- FALSE
+    
+    if(is.character(inclusion_inits[1])){ #for when the user provides a keyword
+      inclusion_inits <- matrix(inclusion_inits,ncol = length(sizes) - 1)
+    }
+    
     if (! is.null(custom_act)) {
       self$act <- custom_act
       }
@@ -118,7 +134,8 @@ lbbnn_net <- torch::nn_module(
         num_transforms = self$num_transforms,
         hidden_dims = self$dims,
         device = self$device,
-        bias_inclusion_prob = self$bias_inclusion_prob))
+        bias_inclusion_prob = self$bias_inclusion_prob,
+        weight_init = weight_init))
     }
     if (input_skip) {
       out_size <- sizes[length(sizes) - 1] + sizes[1]
@@ -135,7 +152,8 @@ lbbnn_net <- torch::nn_module(
       num_transforms = self$num_transforms,
       hidden_dims = self$dims,
       device = self$device,
-      bias_inclusion_prob = self$bias_inclusion_prob))
+      bias_inclusion_prob = self$bias_inclusion_prob,
+      weight_init = weight_init))
 
     if (problem_type == "binary classification") {
       self$out <- torch::nn_sigmoid()
@@ -200,7 +218,6 @@ lbbnn_net <- torch::nn_module(
     if (self$input_skip == TRUE) {
       stop("self$input_skip must be FALSE to use this function")
     }
-    self$computed_paths <- TRUE
     #sending a random input through the network of alpha matrices (0 and 1)
     #and then backpropagating to find active paths
     a <- rnorm(n = self$layers$children$`0`$alpha$shape[2])
@@ -242,20 +259,19 @@ lbbnn_net <- torch::nn_module(
     alp_out[alp_out != 0] <- 1
     alpha_mats_out <- append(alpha_mats_out, alp_out$detach())
     self$out_layer$alpha_active_path <- alp_out$detach()
-    return(alpha_mats_out)
+    invisible(alpha_mats_out)
   },
   compute_paths_input_skip = function() {
     if (self$input_skip == FALSE) {
       stop("self$input_skip must be TRUE to use this funciton")
     }
-    self$computed_paths <- TRUE
     #sending a random input through the network of alpha matrices (0 and 1)
     #and then backpropagating to find active paths
     a <- rnorm(n = self$layers$children$`0`$alpha$shape[2])
     x0 <- torch::torch_tensor(a, dtype = torch::torch_float32(),
                               device = self$device)$unsqueeze(dim = 1)
     alpha_mats <- list() #initialize empty list to append network alphas
-    lamd_input <- self$layers$children$`0`$lambda_l
+    lamd_input <- self$layers$children$`0`$lambda_l$detach()
     alpha_input <- (torch::torch_sigmoid(lamd_input) > 0.5) * 1
     alpha_input$requires_grad <- TRUE
     alpha_mats <- append(alpha_mats, alpha_input)
@@ -299,15 +315,17 @@ lbbnn_net <- torch::nn_module(
     alp_out[alp_out != 0] <- 1
     alpha_mats_out <- append(alpha_mats_out, alp_out$detach())
     self$out_layer$alpha_active_path <- alp_out$detach()
-    return(alpha_mats_out)
+    invisible(alpha_mats_out)
   },
 
   density = function() { #the standard density, without active paths
     alphas <- NULL
     for (l in self$layers$children) {
-      alphas <- c(alphas, as.numeric(l$alpha$clone()$detach()))
-      }
-    alphas <- c(alphas, as.numeric(self$out_layer$alpha$clone()$detach()))
+      lam <- l$lambda_l$clone()$detach()
+      alphas <- c(alphas, as.numeric(torch::torch_sigmoid(lam)))
+    }
+    lam_out <- self$out_layer$lambda_l$clone()$detach()
+    alphas <- c(alphas, as.numeric(torch::torch_sigmoid(lam_out)))
     return(mean(alphas > 0.5))
 
 

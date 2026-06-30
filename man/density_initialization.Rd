@@ -4,12 +4,16 @@
 \alias{density_initialization}
 \title{Generate initializations for the inclusion parameters.}
 \usage{
-density_initialization(lower, upper)
+density_initialization(lower, upper, type = NULL)
 }
 \arguments{
 \item{lower}{numeric scalar.}
 
 \item{upper}{numeric scalar, must be greater than}
+
+\item{type}{user defined keywords. Possible options are:
+'polarized', 'polarized_mild', 'polarized_dense', 'polarized_sparse',
+'dense', 'sparse', and 'balanced'}
 }
 \value{
 A numeric vector of length 2: \code{c(lower,upper)}

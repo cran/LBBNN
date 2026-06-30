@@ -43,9 +43,43 @@ std_prior <- function(x) {
 #' with U ~ Uniform(lower,upper).
 #' @param lower numeric scalar.
 #' @param upper numeric scalar, must be greater than
+#' @param type user defined keywords. Possible options are:
+#' 'polarized', 'polarized_mild', 'polarized_dense', 'polarized_sparse',
+#' 'dense', 'sparse', and 'balanced'
 #' @return A numeric vector of length 2: \code{c(lower,upper)}
 #' @keywords internal
-density_initialization <- function(lower, upper) {
+density_initialization <- function(lower, upper, type = NULL) {
+  if (!is.null(type)) {
+    if(type == 'polarized'){
+      return(c(-10,10))
+    }
+    else if(type == 'polarized_mild'){
+      return(c(-3,3))
+    }
+    else if(type == 'polarized_sparse'){
+      return(c(-10,5))
+    }
+    else if(type == 'polarized_dense'){
+      return(c(-5,10))
+    }
+    else if(type == 'dense'){
+      return(c(1.5,2.5))
+    }
+    else if(type == 'sparse'){
+      return(c(-2.5,-1.5))
+    }
+    else if(type == 'balanced'){
+      return(c(-1.0,1.0))
+    }
+
+    else {
+      stop(
+        "unknown type: ", type,
+        ". Allowed types are: polarized, polarized_mild, polarized_sparse,
+        polarized_dense, dense, sparse, balanced"
+      )
+    }
+  }
   if (!is.numeric(lower))
     stop("invalid_class:", " lower must be numeric")
   if (!is.numeric(upper))
@@ -57,6 +91,44 @@ density_initialization <- function(lower, upper) {
   if (lower >= upper)
     stop("the lower bound must be smaller than the upper bound")
   return(c(lower, upper))
+}
+
+#' @title Apply weight_mean initialization to a tensor.
+#' @description Dispatches to the appropriate torch initializer based on
+#' \code{type}. Accepts a string keyword or a numeric vector of length 2
+#' for custom uniform bounds.
+#' @param tensor A torch parameter tensor to initialize in-place.
+#' @param type A string keyword or numeric vector of length 2.
+#'   String keywords: \code{"uniform"} (default small uniform),
+#'   \code{"he"} / \code{"he_relu"} (Kaiming uniform for ReLU),
+#'   \code{"he_tanh"} (Kaiming uniform for tanh),
+#'   \code{"glorot"} / \code{"xavier"} (Xavier uniform).
+#'   Numeric: treated as \code{c(lower, upper)} bounds for uniform sampling.
+#' @param uniform_lower numeric, lower bound used when \code{type = "uniform"}.
+#' @param uniform_upper numeric, upper bound used when \code{type = "uniform"}.
+#' @keywords internal
+init_weight_mean <- function(tensor, type,
+                             uniform_lower = -0.01, uniform_upper = 0.01) {
+  if (is.numeric(type)) {
+    if (length(type) != 2)
+      stop("weight_init as numeric must have exactly 2 values: c(lower, upper)")
+    if (type[1] >= type[2])
+      stop("weight_init lower bound must be less than upper bound")
+    torch::nn_init_uniform_(tensor, type[1], type[2])
+  } else if (is.character(type)) {
+    switch(type,
+      "uniform" = torch::nn_init_uniform_(tensor, uniform_lower, uniform_upper),
+      "he" = ,
+      "he_relu" = torch::nn_init_kaiming_uniform_(tensor, nonlinearity = "relu"),
+      "he_tanh" = torch::nn_init_kaiming_uniform_(tensor, nonlinearity = "tanh"),
+      "glorot" = ,
+      "xavier" = torch::nn_init_xavier_uniform_(tensor),
+      stop("unknown weight_init: '", type,
+           "'. Allowed: 'uniform', 'he', 'he_relu', 'he_tanh', 'glorot', 'xavier'")
+    )
+  } else {
+    stop("weight_init must be a string or a numeric vector of length 2")
+  }
 }
 
 
@@ -80,17 +152,28 @@ density_initialization <- function(lower, upper) {
 #' for each weight and bias in the layer.
 #' @param standard_prior numeric scalar, prior standard deviation
 #' for weights and biases in each layer.
-#' @param density_init A numeric of size 2,
-#' used to initialize the inclusion parameters, one for each layer.
+#' @param density_init Controls initialization of the inclusion parameters.
+#' A string keyword or a numeric vector \code{c(lower, upper)}.
+#' String options: \code{"polarized"}, \code{"polarized_mild"},
+#' \code{"polarized_sparse"}, \code{"polarized_dense"},
+#' \code{"dense"}, \code{"sparse"}, \code{"balanced"}.
 #' @param flow logical, whether to use normalizing flows
 #' @param num_transforms integer, number of transformations for \code{flow}.
 #' Default is 2.
 #' @param hidden_dims numeric vector, dimension of the hidden layer(s)
 #' in the neural networks of the RNVP transform.
-#' @param device The device to be used. Default is CPU.
+#' @param device the device to be used. One of \code{'cpu'} (default),
+#' \code{'gpu'} or \code{'cuda'} (both select a CUDA GPU), or \code{'mps'}.
+#' Requesting an accelerator that is not available raises an error.
 #' @param bias_inclusion_prob logical, determines whether the bias
 #' should be as associated with inclusion probabilities.
 #' @param conv_net logical, whether the layer is used in a convolutional net.
+#' @param weight_init Controls how \code{weight_mean} is initialized.
+#' A string keyword or a numeric vector \code{c(lower, upper)} for custom
+#' uniform bounds. String options: \code{"uniform"} (default, small uniform),
+#' \code{"he"} / \code{"he_relu"} (Kaiming uniform for ReLU),
+#' \code{"he_tanh"} (Kaiming uniform for tanh),
+#' \code{"glorot"} / \code{"xavier"} (Xavier uniform).
 #' @examples
 #' \donttest{
 #' if (torch_available()) {
@@ -123,7 +206,9 @@ lbbnn_linear <- torch::nn_module(
     hidden_dims = c(200, 200),
     device = "cpu",
     bias_inclusion_prob = FALSE,
-    conv_net = FALSE) {
+    conv_net = FALSE,
+    weight_init = "uniform") {
+    device <- resolve_device(device)
     self$in_features  <- in_features
     self$out_features <- out_features
     self$device <- device
@@ -132,8 +217,13 @@ lbbnn_linear <- torch::nn_module(
     self$conv_net <- conv_net
     self$num_transforms <- num_transforms
     self$hidden_dims <- hidden_dims
-    self$density_init <- density_initialization(density_init[1],
-                                                density_init[2])
+    self$weight_init <- weight_init
+    if(is.character(density_init[1])){
+      self$density_init <- density_initialization(type = density_init)
+    }else{self$density_init <- density_initialization(density_init[1],
+                                                      density_init[2])
+    }
+
     #weight variational parameters
 
     self$weight_mean <- torch::nn_parameter(torch::torch_empty(out_features,
@@ -206,7 +296,8 @@ lbbnn_linear <- torch::nn_module(
     self$reset_parameters()
   },
   reset_parameters = function() {
-    torch::nn_init_uniform_(self$weight_mean, -0.01, 0.01)
+    init_weight_mean(self$weight_mean, self$weight_init,
+                     uniform_lower = -0.01, uniform_upper = 0.01)
     torch::nn_init_normal_(self$weight_rho, mean = -9, std = 1.0)
     torch::nn_init_uniform_(self$bias_mean, -0.2, 0.2)
     torch::nn_init_normal_(self$bias_rho, mean = -9, std = 1.0)
@@ -219,8 +310,6 @@ lbbnn_linear <- torch::nn_module(
       torch::nn_init_normal_(self$b1, mean = 0, std = 1)
       torch::nn_init_normal_(self$b2, mean = 0, std = 1)
     }
-
-
   },
   sample_z = function() {
     q0_std <- torch::torch_sqrt(torch::torch_exp(self$q0_logvar))
@@ -366,14 +455,25 @@ lbbnn_linear <- torch::nn_module(
 #' each weight and bias in the layer.
 #' @param standard_prior numeric scalar, prior standard deviation for
 #' weights and biases in each layer.
-#' @param density_init A numeric of size 2, used to initialize the
-#' inclusion parameters, one for each layer.
+#' @param density_init Controls initialization of the inclusion parameters.
+#' A string keyword or a numeric vector \code{c(lower, upper)}.
+#' String options: \code{"polarized"}, \code{"polarized_mild"},
+#' \code{"polarized_sparse"}, \code{"polarized_dense"},
+#' \code{"dense"}, \code{"sparse"}, \code{"balanced"}.
 #' @param flow logical, whether to use normalizing flows
 #' @param num_transforms integer, number of transformations for \code{flow}.
 #'  Default is 2.
 #' @param hidden_dims numeric vector, dimension of the hidden layer(s)
 #' in the neural networks of the RNVP transform.
-#' @param device The device to be used. Default is CPU.
+#' @param device the device to be used. One of \code{'cpu'} (default),
+#' \code{'gpu'} or \code{'cuda'} (both select a CUDA GPU), or \code{'mps'}.
+#' Requesting an accelerator that is not available raises an error.
+#' @param weight_init Controls how \code{weight_mean} is initialized.
+#' A string keyword or a numeric vector \code{c(lower, upper)} for custom
+#' uniform bounds. String options: \code{"uniform"} (default, small uniform),
+#' \code{"he"} / \code{"he_relu"} (Kaiming uniform for ReLU),
+#' \code{"he_tanh"} (Kaiming uniform for tanh),
+#' \code{"glorot"} / \code{"xavier"} (Xavier uniform).
 #' @examples
 #' \donttest{
 #' if (torch_available()) {
@@ -401,7 +501,8 @@ lbbnn_conv2d <- torch::nn_module(
   initialize = function(in_channels, out_channels, kernel_size, prior_inclusion,
                         standard_prior, density_init,
                         flow = FALSE, num_transforms = 2,
-                        hidden_dims = c(200, 200), device = "cpu") {
+                        hidden_dims = c(200, 200), device = "cpu",
+                        weight_init = "uniform") {
 
     if (length(kernel_size) == 1) {
       kernel <- c(kernel_size, kernel_size)
@@ -410,14 +511,19 @@ lbbnn_conv2d <- torch::nn_module(
       kernel <- kernel_size
     }else (stop("kernel_size must be of either length one or two."))
 
+    device <- resolve_device(device)
     self$in_channels  <- in_channels
     self$out_channels <- out_channels
     self$flow <- flow #true or false
     self$num_transforms <- num_transforms
     self$hidden_dims <- hidden_dims
     self$device <- device
-    self$density_init <- density_initialization(density_init[1],
-                                                density_init[2])
+    self$weight_init <- weight_init
+    if(is.character(density_init[1])){
+      self$density_init <- density_initialization(type = density_init)
+    }else{self$density_init <- density_initialization(density_init[1],
+                                                      density_init[2])
+    }
 
     #weight variational parameters
     self$weight_mean <- torch::nn_parameter(torch_empty(out_channels,
@@ -473,7 +579,7 @@ lbbnn_conv2d <- torch::nn_module(
       self$b1 <- torch::nn_parameter(torch::torch_empty(out_channels,
                                                         device = device))
       self$b2 <- torch::nn_parameter(torch::torch_empty(out_channels,
-                                                        evice = device))
+                                                        device = device))
 
 
       self$RNVP_flow <- normalizing_flow(c(out_channels, hidden_dims), "RNVP",
@@ -484,7 +590,8 @@ lbbnn_conv2d <- torch::nn_module(
     self$reset_parameters()
   },
   reset_parameters = function() {
-    torch::nn_init_uniform_(self$weight_mean, -0.2, 0.2)
+    init_weight_mean(self$weight_mean, self$weight_init,
+                     uniform_lower = -0.2, uniform_upper = 0.2)
     torch::nn_init_normal_(self$weight_rho, mean = -9, std = 0.1)
     torch::nn_init_uniform_(self$bias_mean, -0.2, 0.2)
     torch::nn_init_normal_(self$bias_rho, mean = -9, std = 0.1)
@@ -497,7 +604,6 @@ lbbnn_conv2d <- torch::nn_module(
       torch::nn_init_normal_(self$b1, mean = 0, std = 1)
       torch::nn_init_normal_(self$b2, mean = 0, std = 1)
     }
-
   },
   forward = function(input, MPM = FALSE) {
     self$alpha <- 1 / (1 + torch::torch_exp(- self$lambda_l))
@@ -513,7 +619,7 @@ lbbnn_conv2d <- torch::nn_module(
       e_w <- self$weight_mean * self$alpha * z_k$view(c(-1, 1, 1, 1))
       var_w <- self$alpha * (self$weight_sigma ^ 2 + (1 - self$alpha) *
                             self$weight_mean ^ 2 * z_k$view(c(-1, 1, 1, 1)) ^ 2)
-      psi <- torch::nnf_conv2d(input = input, weight = e_w, bias = self$bias_mu)
+      psi <- torch::nnf_conv2d(input = input, weight = e_w, bias = self$bias_mean)
       delta <- torch::nnf_conv2d(input = input ^ 2, weight = var_w,
                                  bias = self$bias_sigma ^ 2)
       #delta[delta<= 0] = 0 +1e-20
@@ -558,8 +664,8 @@ lbbnn_conv2d <- torch::nn_module(
       W_mean <- self$weight_mean * self$alpha * z2$view(c(-1, 1, 1, 1))
       W_var <-  self$alpha * (self$weight_sigma ^ 2 + (1 - self$alpha) *
                             self$weight_mean ^ 2 * z2$view(c(-1, 1, 1, 1)) ^ 2)
-      act_mu <- torch::torch_matmul(W_mean$view(- 1, length(self$c1)), self$c1)
-      act_var <- torch::torch_matmul(W_mean$view(- 1, length(self$c1)),
+      act_mu <- torch::torch_matmul(W_mean$view(c(-1, length(self$c1))), self$c1)
+      act_var <- torch::torch_matmul(W_var$view(c(-1, length(self$c1))),
                                      self$c1 ^ 2)
 
       # For convolutional layers, linear mappings empirically work better than

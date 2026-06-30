@@ -11,7 +11,9 @@ train_lbbnn(
   train_dl,
   device = "cpu",
   scheduler = NULL,
-  sch_step_size = NULL
+  sch_step_size = NULL,
+  min_density = NULL,
+  verbose = TRUE
 )
 }
 \arguments{
@@ -25,8 +27,9 @@ is a pass through the entire training dataset (all mini batches).}
 \item{train_dl}{An instance of \code{torch::dataloader}
 consisting of a tensor dataset with features and targets.}
 
-\item{device}{the device to be trained on. Default is 'cpu',
-also accepts 'gpu' or 'mps'.}
+\item{device}{the device to be used. One of \code{'cpu'} (default),
+\code{'gpu'} or \code{'cuda'} (both select a CUDA GPU), or \code{'mps'}.
+Requesting an accelerator that is not available raises an error.}
 
 \item{scheduler}{A torch learning rate scheduler object.
 Can be used to decay learning rate for better convergence,
@@ -34,6 +37,12 @@ currently only supports 'step'.}
 
 \item{sch_step_size}{Where to decay if using \code{torch::lr_step}.
 E.g. 1000 means learning rate is decayed every 1000 epochs.}
+
+\item{min_density}{Optional argument to stop training if the density reaches
+this value. Currently, this is the overall density, not density in active
+paths, as the latter is expensive to compute for each epoch.}
+
+\item{verbose}{Control whether metrics are printed to console.}
 }
 \value{
 a list containing the losses and accuracy (if classification)

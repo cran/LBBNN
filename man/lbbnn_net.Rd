@@ -19,7 +19,8 @@ lbbnn_net(
   custom_act = NULL,
   link = NULL,
   nll = NULL,
-  bias_inclusion_prob = FALSE
+  bias_inclusion_prob = FALSE,
+  weight_init = "uniform"
 )
 }
 \arguments{
@@ -40,18 +41,22 @@ length must be \code{length(sizes) - 1}.}
 
 \item{inclusion_inits}{numeric matrix of shape (2, number of weight matrices)
 specifying the lower and upper bounds for initializations
-of the inclusion parameters.}
+of the inclusion parameters. NOTE: Can also be given as a keyword with the
+following options: 'balanced', 'dense', 'polarized', 'polarized_dense',
+'polarized_mild', 'polarized_sparse', 'sparse'.}
 
 \item{input_skip}{logical, whether to include input_skip.}
 
-\item{flow}{logical, whether to use normalizing flows.}
+\item{flow}{logical, to use normalizing flows.}
 
 \item{num_transforms}{integer, how many transformations to use in the flow.}
 
 \item{dims}{numeric vector, hidden dimension for the neural network
 in the RNVP transform.}
 
-\item{device}{the device to be trained on. Can be 'cpu', 'gpu' or 'mps'.
+\item{device}{the device to be used. One of \code{'cpu'} (default),
+\code{'gpu'} or \code{'cuda'} (both select a CUDA GPU), or \code{'mps'}.
+Requesting an accelerator that is not available raises an error.
 Default is cpu.}
 
 \item{raw_output}{logical, whether the network skips the last sigmoid/softmax
@@ -66,6 +71,13 @@ activation function.}
 
 \item{bias_inclusion_prob}{logical, determines whether the bias should
 be as associated with inclusion probabilities.}
+
+\item{weight_init}{Controls how \code{weight_mean} is initialized in each
+layer. A string keyword or a numeric vector \code{c(lower, upper)} for
+custom uniform bounds. String options: \code{"uniform"} (default),
+\code{"he"} / \code{"he_relu"} (Kaiming uniform for ReLU),
+\code{"he_tanh"} (Kaiming uniform for tanh),
+\code{"glorot"} / \code{"xavier"} (Xavier uniform).}
 }
 \value{
 A \code{torch::nn_module} object representing the LBBNN.
